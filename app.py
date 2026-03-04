@@ -18,7 +18,7 @@ def get_est_time(avg, queue, staff):
 # --- [#1. 로고 화면 & #2. 권한 동의] ---
 if st.session_state.step == 1:
     st.title("💊 PharmFlow")
-    st.write("내 시간에 맞는 약국으로")
+    st.write("내 시간에 맞는 약국으로") 
     
     with st.container(border=True):
         st.markdown("<h1 style='text-align: center;'>📍</h1>", unsafe_allow_html=True)
@@ -139,5 +139,3 @@ elif st.session_state.step == 4:
         st.session_state.step = 1
         st.session_state.reservation = None
         st.rerun()
-
-

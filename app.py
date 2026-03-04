@@ -13,12 +13,13 @@ if 'reservation' not in st.session_state:
     st.session_state.reservation = None
 
 def get_est_time(avg, queue, staff):
+    if staff == 0: return 999
     return int((queue * avg) / staff + 5)
 
 # --- [#1. 로고 화면 & #2. 권한 동의] ---
 if st.session_state.step == 1:
     st.title("💊 PharmFlow")
-    st.write("내 시간에 맞는 약국으로") 
+    st.write("내 시간에 맞는 약국으로")
     
     with st.container(border=True):
         st.markdown("<h1 style='text-align: center;'>📍</h1>", unsafe_allow_html=True)
@@ -30,8 +31,7 @@ if st.session_state.step == 1:
 # --- [#3. 튜토리얼 & #4. 사진 업로드] ---
 elif st.session_state.step == 2:
     st.title("PharmFlow")
-    # 수정하신 조제 가능 멘트 반영
-    st.info("💡 처방전을 찍어 올리면 조제 가능한 약국을 찾아드려요.") 
+    st.info("💡 처방전을 찍어 올리면 조제 가능한 약국을 찾아드려요.")
     
     st.subheader("📸 처방전 업로드")
     uploaded_file = st.file_uploader("이미지를 업로드하거나 촬영하세요.", type=['jpg', 'png', 'jpeg'])
@@ -46,10 +46,9 @@ elif st.session_state.step == 2:
 elif st.session_state.step == 3:
     st.subheader("🔍 주변 약국 실시간 현황")
     
-    # 완주 삼례읍 행정복지센터 인근 좌표
     base_lat, base_lon = 35.91, 127.07
     
-    np.random.seed(42) 
+    np.random.seed(42)
     pharm_names = ['삼례종로약국', '우석약국(추천)', '삼례정문약국', '중앙제일약국', '정성약국', '비비정약국', '삼례현대약국']
     
     lats = base_lat + (np.random.uniform(-0.005, 0.005, size=7))
@@ -95,8 +94,7 @@ elif st.session_state.step == 3:
     ))
     
     st.write("---")
-    # 선택 안내 멘트 반영
-    st.caption("가까운 거리와 조제완료 시간을 고려해 선택하세요.") 
+    st.caption("가까운 거리와 조제완료 시간을 고려해 선택하세요.")
 
     for i in range(len(df)):
         with st.container(border=True):
@@ -104,8 +102,7 @@ elif st.session_state.step == 3:
             with col1:
                 st.markdown(f"**{df.iloc[i]['약국명']}**")
                 if "추천" in df.iloc[i]['약국명']:
-                    # B급 입지 추천 멘트 반영
-                    st.info("✨ 대기 시간이 짧은 B급 입지 추천 약국입니다.") 
+                    st.info("✨ 대기 시간이 짧은 B급 입지 추천 약국입니다.")
             with col2:
                 st.subheader(f"{df.iloc[i]['예상시간']}분")
             
@@ -123,8 +120,7 @@ elif st.session_state.step == 4:
     
     with st.container(border=True):
         st.markdown(f"### ⏱️ **{res['예상시간']}분 후**")
-        # 완료 예정 멘트 반영
-        st.markdown("예약하신 약이 완료될 예정입니다.") 
+        st.markdown("예약하신 약이 완료될 예정입니다.")
         
         st.write("---")
         st.warning("📍 약국에 도착하면 처방전을 데스크에 제출해주세요.")

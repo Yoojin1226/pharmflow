@@ -2,9 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import pydeck as pdk
-import time
 
-# --- [1. 초기 설정 및 상태 관리] ---
+# --- [1. 초기 설정] ---
 st.set_page_config(page_title="💊PharmFlow(팜플로우)", layout="centered")
 
 if 'step' not in st.session_state:
@@ -16,7 +15,7 @@ def get_est_time(avg, queue, staff):
     if staff == 0: return 999
     return int((queue * avg) / staff + 5)
 
-# --- [#1. 로고 화면 & #2. 권한 동의] ---
+# --- [#1 & #2. 메인 및 권한 동의] ---
 if st.session_state.step == 1:
     st.title("💊 PharmFlow")
     st.write("내 시간에 맞는 약국으로")
@@ -28,7 +27,7 @@ if st.session_state.step == 1:
             st.session_state.step = 2
             st.rerun()
 
-# --- [#3. 튜토리얼 & #4. 사진 업로드] ---
+# --- [#3 & #4. 튜토리얼 및 업로드] ---
 elif st.session_state.step == 2:
     st.title("PharmFlow")
     st.info("💡 처방전을 찍어 올리면 조제 가능한 약국을 찾아드려요.")
@@ -42,15 +41,17 @@ elif st.session_state.step == 2:
             st.session_state.step = 3
             st.rerun()
 
-# --- [#5. 완주 삼례 기반 지도 & #6. 약국 나열] ---
+# --- [#5 & #6. 지도 및 약국 선택 - 오류 수정 버전] ---
 elif st.session_state.step == 3:
     st.subheader("🔍 주변 약국 실시간 현황")
     
+    # 완주 삼례읍 중심 좌표
     base_lat, base_lon = 35.91, 127.07
     
     np.random.seed(42)
     pharm_names = ['삼례종로약국', '우석약국(추천)', '삼례정문약국', '중앙제일약국', '정성약국', '비비정약국', '삼례현대약국']
     
+    # 무작위 위치 생성
     lats = base_lat + (np.random.uniform(-0.005, 0.005, size=7))
     lons = base_lon + (np.random.uniform(-0.005, 0.005, size=7))
     
@@ -66,14 +67,16 @@ elif st.session_state.step == 3:
     df['예상시간'] = df.apply(lambda x: get_est_time(x['avg'], x['queue'], x['staff']), axis=1)
     df = df.sort_values(by='예상시간').reset_index(drop=True)
 
-    view_state = pdk.ViewState(latitude=base_lat, longitude=base_lon, zoom=14, pitch=0)
+    # [안전 모드 지도 설정]
+    # 스타일을 'light'나 'dark' 같은 기본값으로 설정하여 인증 키 오류를 방지합니다.
+    view_state = pdk.ViewState(latitude=base_lat, longitude=base_lon, zoom=14)
 
     layer_points = pdk.Layer(
         "ScatterplotLayer",
         df,
         get_position='[lon, lat]',
-        get_color='[255, 75, 75, 160]',
-        get_radius=40,
+        get_color='[255, 75, 75, 200]', # 빨간색 점
+        get_radius=60,
         pickable=True
     )
 
@@ -82,15 +85,16 @@ elif st.session_state.step == 3:
         df,
         get_position='[lon, lat]',
         get_text='약국명',
-        get_size=16,
+        get_size=20,
         get_color=[0, 0, 0],
         get_alignment_baseline="'bottom'",
     )
 
+    # map_style을 지우거나 아주 기본값으로 설정
     st.pydeck_chart(pdk.Deck(
         layers=[layer_points, layer_text],
         initial_view_state=view_state,
-        map_style='mapbox://styles/mapbox/light-v9'
+        map_style=None # 이 부분이 중요합니다! 시스템 기본 지도를 사용합니다.
     ))
     
     st.write("---")
@@ -111,21 +115,17 @@ elif st.session_state.step == 3:
                 st.session_state.step = 4
                 st.rerun()
 
-# --- [#7, #8, #9. 최종 완료 및 상세 내역] ---
+# --- [#7, #8, #9. 최종 완료] ---
 elif st.session_state.step == 4:
     res = st.session_state.reservation
     st.balloons()
-    
     st.success("✅ 조제 예약이 완료되었습니다!")
     
     with st.container(border=True):
         st.markdown(f"### ⏱️ **{res['예상시간']}분 후**")
         st.markdown("예약하신 약이 완료될 예정입니다.")
-        
         st.write("---")
         st.warning("📍 약국에 도착하면 처방전을 데스크에 제출해주세요.")
-        
-        st.write("📋 **내 예약 내역**")
         st.info(f"**{res['약국명']}** 조제 예약 완료")
     
     if st.button("처음으로 돌아가기"):

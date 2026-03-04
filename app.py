@@ -5,7 +5,7 @@ import pydeck as pdk
 import time
 
 # --- [1. 초기 설정 및 상태 관리] ---
-st.set_page_config(page_title="💊PharmFlow", layout="centered")
+st.set_page_config(page_title="💊PharmFlow 팜플로우", layout="centered")
 
 if 'step' not in st.session_state:
     st.session_state.step = 1
@@ -44,7 +44,6 @@ elif st.session_state.step == 2:
             if st.button("분석 시작", use_container_width=True, type="primary"):
                 with st.spinner("🔍 처방전 성분을 분석 중입니다..."):
                     time.sleep(2)
-                    # 사진 검증 로직 (용량 기준)
                     if uploaded_file.size < 50000:
                         st.error("❌ 처방전 형식이 아닙니다. 처방전을 다시 찍어주세요.")
                     else:
@@ -80,11 +79,11 @@ elif st.session_state.step == 2.5:
             st.session_state.step = 2
             st.rerun()
 
-# --- [#5 & #6. 지도 화면 및 약국 선택 (번호 매기기 적용)] ---
+# --- [#5 & #6. 지도 화면 및 약국 선택] ---
 elif st.session_state.step == 3:
     st.subheader("🔍 주변 약국 실시간 현황")
     
-    my_lat, my_lon = 35.91, 127.07 # 완주 삼례 기준
+    my_lat, my_lon = 35.91, 127.07
     np.random.seed(42)
     pharm_names = ['삼례종로약국', '우석약국', '삼례정문약국', '중앙제일약국', '정성약국', '비비정약국', '삼례현대약국']
     
@@ -100,15 +99,15 @@ elif st.session_state.step == 3:
         'staff': [2, 2, 2, 2, 2, 1, 2]
     })
     
-    # 조제 예상 시간 계산 및 정렬
     df['예상시간'] = df.apply(lambda x: get_est_time(x['avg'], x['queue'], x['staff']), axis=1)
     df = df.sort_values(by='예상시간').reset_index(drop=True)
     
-    # 약국에 번호(ID) 부여 (1번부터 시작)
     df['id'] = range(1, len(df) + 1)
     df['id_str'] = df['id'].astype(str)
 
-    # 지도 레이어
+    # [내 위치 데이터] "Me" 텍스트 포함
+    me_df = pd.DataFrame({'lat': [my_lat], 'lon': [my_lon], 'label': ['Me']})
+
     view_state = pdk.ViewState(latitude=my_lat, longitude=my_lon, zoom=14)
 
     # 1) 약국 마커 (빨간 동그라미)
@@ -117,47 +116,48 @@ elif st.session_state.step == 3:
         get_color='[255, 75, 75, 200]', get_radius=60,
     )
 
-    # 2) 내 위치 (파란색 큰 점)
+    # 2) 내 위치 (파란 점)
     layer_me = pdk.Layer(
-        "ScatterplotLayer", pd.DataFrame({'lat': [my_lat], 'lon': [my_lon]}),
-        get_position='[lon, lat]', get_color='[0, 120, 255, 255]', get_radius=85,
+        "ScatterplotLayer", me_df, get_position='[lon, lat]',
+        get_color='[0, 120, 255, 255]', get_radius=85,
     )
 
-    # 3) 번호 표시 (동그라미 정중앙에 숫자 띄우기)
+    # 3) 약국 번호 텍스트 (흰색)
     layer_id_text = pdk.Layer(
-        "TextLayer",
-        df,
-        get_position='[lon, lat]',
-        get_text='id_str',
-        get_size=26,
-        get_color=[255, 255, 255], # 흰색 숫자로 선명하게
+        "TextLayer", df, get_position='[lon, lat]',
+        get_text='id_str', get_size=26, get_color=[255, 255, 255],
+        get_alignment_baseline="'center'",
+    )
+
+    # 4) 내 위치 "Me" 텍스트 (흰색)
+    layer_me_text = pdk.Layer(
+        "TextLayer", me_df, get_position='[lon, lat]',
+        get_text='label', get_size=24, get_color=[255, 255, 255],
         get_alignment_baseline="'center'",
     )
 
     st.pydeck_chart(pdk.Deck(
-        layers=[layer_points, layer_me, layer_id_text],
+        layers=[layer_points, layer_me, layer_id_text, layer_me_text],
         initial_view_state=view_state,
         map_style=None
     ))
     
     st.write("---")
-    st.caption("📍 파란 점이 현재 위치이며, 숫자는 하단 리스트의 번호와 일치합니다.")
+    st.caption("📍 'Me'는 현재 위치이며, 숫자는 하단 리스트의 번호입니다.")
     
     if st.button("⬅️ 이전 단계 (처방 정보 확인)", use_container_width=True):
         st.session_state.step = 2.5
         st.rerun()
 
-    # 하단 약국 리스트 (번호 표시)
     for i in range(len(df)):
         with st.container(border=True):
             col1, col2 = st.columns([3, 1])
             with col1:
-                # 번호와 약국명을 함께 표시
                 st.markdown(f"### {df.iloc[i]['id']}. {df.iloc[i]['약국명']}")
             with col2:
                 st.subheader(f"{df.iloc[i]['예상시간']}분")
             
-            if st.button(f"{df.iloc[i]['id']}번 약국 예약하기", key=f"book_{i}", use_container_width=True):
+            if st.button(f"{df.iloc[i]['id']}번 예약하기", key=f"book_{i}", use_container_width=True):
                 st.session_state.reservation = df.iloc[i]
                 st.session_state.step = 4
                 st.rerun()

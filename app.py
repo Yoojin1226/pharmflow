@@ -5,7 +5,7 @@ import pydeck as pdk
 import time
 
 # --- [1. 초기 설정 및 상태 관리] ---
-st.set_page_config(page_title="💊PharmFlow 팜플로우", layout="centered")
+st.set_page_config(page_title="💊PharmFlow", layout="centered")
 
 if 'step' not in st.session_state:
     st.session_state.step = 1
@@ -18,7 +18,7 @@ def get_est_time(avg, queue, staff):
 
 # --- [#1 & #2. 메인 및 권한 동의] ---
 if st.session_state.step == 1:
-    st.title("💊 PharmFlow")
+    st.title("💊 PharmFlow 팜플로우")
     st.write("내 시간에 맞는 약국으로")
     
     with st.container(border=True):
@@ -105,31 +105,31 @@ elif st.session_state.step == 3:
     df['id'] = range(1, len(df) + 1)
     df['id_str'] = df['id'].astype(str)
 
-    # [내 위치 데이터] "Me" 텍스트 포함
+    # 내 위치 데이터 "Me" 포함
     me_df = pd.DataFrame({'lat': [my_lat], 'lon': [my_lon], 'label': ['Me']})
 
     view_state = pdk.ViewState(latitude=my_lat, longitude=my_lon, zoom=14)
 
-    # 1) 약국 마커 (빨간 동그라미)
+    # 1) 약국 마커
     layer_points = pdk.Layer(
         "ScatterplotLayer", df, get_position='[lon, lat]',
         get_color='[255, 75, 75, 200]', get_radius=60,
     )
 
-    # 2) 내 위치 (파란 점)
+    # 2) 내 위치 점
     layer_me = pdk.Layer(
         "ScatterplotLayer", me_df, get_position='[lon, lat]',
         get_color='[0, 120, 255, 255]', get_radius=85,
     )
 
-    # 3) 약국 번호 텍스트 (흰색)
+    # 3) 약국 번호 텍스트
     layer_id_text = pdk.Layer(
         "TextLayer", df, get_position='[lon, lat]',
         get_text='id_str', get_size=26, get_color=[255, 255, 255],
         get_alignment_baseline="'center'",
     )
 
-    # 4) 내 위치 "Me" 텍스트 (흰색)
+    # 4) "Me" 텍스트
     layer_me_text = pdk.Layer(
         "TextLayer", me_df, get_position='[lon, lat]',
         get_text='label', get_size=24, get_color=[255, 255, 255],
@@ -162,7 +162,7 @@ elif st.session_state.step == 3:
                 st.session_state.step = 4
                 st.rerun()
 
-# --- [#7~#9. 최종 완료] ---
+# --- [#7~#9. 최종 완료 (수정된 단계)] ---
 elif st.session_state.step == 4:
     res = st.session_state.reservation
     st.balloons()
@@ -175,13 +175,8 @@ elif st.session_state.step == 4:
         st.warning("📍 약국에 도착하면 처방전을 데스크에 제출해주세요.")
         st.info(f"**[{res['id']}번 {res['약국명']}]** 조제 예약 완료")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("⬅️ 다시 선택하기", use_container_width=True):
-            st.session_state.step = 3
-            st.rerun()
-    with col2:
-        if st.button("🏠 처음으로 돌아가기", use_container_width=True):
-            st.session_state.step = 1
-            st.session_state.reservation = None
-            st.rerun()
+    # "다시 선택하기" 버튼을 제거하고 "처음으로 돌아가기"만 유지합니다.
+    if st.button("🏠 처음으로 돌아가기", use_container_width=True):
+        st.session_state.step = 1
+        st.session_state.reservation = None
+        st.rerun()

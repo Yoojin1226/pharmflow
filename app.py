@@ -27,6 +27,7 @@ if 'pharmacy_orders' not in st.session_state: st.session_state.pharmacy_orders =
 if 'completed_orders' not in st.session_state: st.session_state.completed_orders = []
 if 'last_clear_time' not in st.session_state: st.session_state.last_clear_time = time.time()
 
+# 20분 메모리 자동 삭제 로직
 if time.time() - st.session_state.last_clear_time > 1200:
     st.session_state.completed_orders = []
     st.session_state.last_clear_time = time.time()
@@ -53,7 +54,6 @@ if st.session_state.role is None:
 
 # --- [A. 환자용 서비스] ---
 elif st.session_state.role == "patient":
-    # #1 피드백 반영: 조제 예약 단계를 제외한 모든 단계에서 사이드바 [처음으로] 버튼 복구
     if st.session_state.step < 4:
         if st.sidebar.button("🏠 처음으로 돌아가기", use_container_width=True):
             st.session_state.role = None; st.session_state.step = 1; st.rerun()
@@ -96,10 +96,10 @@ elif st.session_state.role == "patient":
 
         me_df = pd.DataFrame({'lat': [my_lat], 'lon': [my_lon], 'label': ['Me']})
 
-        # #3 피드백 반영: 지도 레이어(빨간/파란 원, 숫자, Me 라벨) 완벽 복구
+        # #4 피드백 반영: 지도 바탕 오류 해결 (안정적인 light 스타일 적용)
         view_state = pdk.ViewState(latitude=my_lat, longitude=my_lon, zoom=14)
         st.pydeck_chart(pdk.Deck(
-            map_style='mapbox://styles/mapbox/light-v9',
+            map_style='light', 
             initial_view_state=view_state,
             layers=[
                 pdk.Layer("ScatterplotLayer", df, get_position='[lon, lat]', get_color='[255, 75, 75, 200]', get_radius=60),
@@ -121,10 +121,24 @@ elif st.session_state.role == "patient":
 
     elif st.session_state.step == 3.5:
         p_name = st.session_state.reservation['약국명']
+        # #1 피드백 반영: 사라졌던 변수 표출 및 수식 복구
         eta, n_wait, t_avg, w_time, p_staff, b_type = calculate_pharm_eta(p_name)
         st.subheader("🧪 ETA 산출 근거 확인")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write(f"- 실시간 대기($N_{{wait}}$): {n_wait}건")
+            st.write(f"- 평균 조제 시간($T_{{avg}}$): {t_avg}분")
+            st.write(f"- 조제 인력($P_{{staff}}$): {p_staff}명")
+        with col2:
+            st.write(f"- 시간 가중치($W_{{time}}$): {w_time}배")
+            st.write(f"- 복잡 가중치($W_{{complex}}$): 1.1배")
+            st.write(f"- 약국 유형 보정($B_{{type}}$): {b_type}분")
+
+        st.write("---")
         st.latex(r"ETA = \frac{N_{wait} \times T_{avg} \times W_{time} \times W_{complex}}{P_{staff}} + B_{type}")
         st.latex(rf"ETA = \frac{{{n_wait} \times {t_avg} \times {w_time} \times 1.1}}{{{p_staff}}} + {b_type} = {eta}분")
+        
         if st.button("위 산출 근거를 확인했으며, 조제를 요청합니다", use_container_width=True, type="primary"):
             res_time = get_kst_now().strftime("%H:%M")
             st.session_state.pharmacy_orders.append({
@@ -135,7 +149,6 @@ elif st.session_state.role == "patient":
     elif st.session_state.step == 4:
         res = st.session_state.reservation
         st.balloons(); st.success("✅ 조제 예약이 최종 완료되었습니다!")
-        # #2 피드백 반영: 누락되었던 안내 컨테이너 복구
         with st.container(border=True):
             st.markdown(f"### ⏱️ **{res['예상시간']}분 후**")
             st.write("예약하신 약이 완료될 예정입니다.")
@@ -147,15 +160,23 @@ elif st.session_state.role == "patient":
 
 # --- [B. 약국용 관리자 화면] ---
 elif st.session_state.role == "pharmacy":
-    if st.sidebar.button("🏠 로그아웃", use_container_width=True):
-        st.session_state.role = None; st.session_state.admin_step = 1; st.rerun()
+    # #2 피드백 반영: 로그아웃 창을 Expander로 감싸 항상 닫혀 있게 설정
+    with st.sidebar.expander("🚪 시스템 설정", expanded=False):
+        if st.button("로그아웃", use_container_width=True):
+            st.session_state.role = None; st.session_state.admin_step = 1; st.rerun()
 
+    # Step 1: 약국 선택
     if st.session_state.admin_step == 1:
         st.title("👨‍⚕️ 약국 관리자")
         selected = st.selectbox("관리하실 약국 선택", list(st.session_state.pharm_db.keys()))
-        if st.button("관리 시작", use_container_width=True, type="primary"):
-            st.session_state.selected_pharmacy = selected; st.session_state.admin_step = 2; st.rerun()
+        col_prev, col_next = st.columns(2)
+        with col_prev: # #3 피드백 반영: 모든 페이지에 이전으로 버튼
+            if st.button("⬅️ 초기 화면", use_container_width=True): st.session_state.role = None; st.rerun()
+        with col_next:
+            if st.button("관리 시작 ➡️", use_container_width=True, type="primary"):
+                st.session_state.selected_pharmacy = selected; st.session_state.admin_step = 2; st.rerun()
 
+    # Step 2: 메뉴 선택
     elif st.session_state.admin_step == 2:
         st.title(f"🏢 {st.session_state.selected_pharmacy} 관리")
         col1, col2 = st.columns(2)
@@ -163,7 +184,9 @@ elif st.session_state.role == "pharmacy":
             if st.button("⚙️ 약국 환경 설정", use_container_width=True, type="primary"): st.session_state.admin_step = 3; st.rerun()
         with col2:
             if st.button("📥 조제 예약 관리", use_container_width=True): st.session_state.admin_step = 4; st.rerun()
+        if st.button("⬅️ 약국 다시 선택", use_container_width=True): st.session_state.admin_step = 1; st.rerun()
 
+    # Step 3: 환경 설정
     elif st.session_state.admin_step == 3:
         p_name = st.session_state.selected_pharmacy
         st.subheader("⚙️ 약국 환경 설정")
@@ -173,14 +196,18 @@ elif st.session_state.role == "pharmacy":
             status = st.select_slider("내부 혼잡도", options=["원활", "보통", "혼잡"])
             st.session_state.pharm_db[p_name]['N_offline'] = {"원활":0, "보통":3, "혼잡":6}[status]
             st.session_state.pharm_db[p_name]['B_type'] = st.selectbox("약국 유형", [5.0, 10.0, 2.0], format_func=lambda x: "내과(+5)" if x==5 else "대학병원(+10)" if x==10 else "소아과(+2)")
-            is_peak = st.checkbox("피크 가중치 적용", value=(st.session_state.pharm_db[p_name]['W_time'] == 1.2))
-            st.session_state.pharm_db[p_name]['W_time'] = 1.2 if is_peak else 1.0
-        st.session_state.pharm_db[p_name]['is_accepting'] = st.radio("📡 조제 수락 여부", ["예", "아니오"], index=0 if st.session_state.pharm_db[p_name]['is_accepting']=="예" else 1)
-        if st.button("설정 저장 및 메뉴로 돌아가기", use_container_width=True): st.session_state.admin_step = 2; st.rerun()
+            st.session_state.pharm_db[p_name]['W_time'] = 1.2 if st.checkbox("피크 가중치 적용") else 1.0
+        
+        col_prev, col_save = st.columns(2)
+        with col_prev: # #3 피드백 반영
+            if st.button("⬅️ 메뉴로 돌아가기", use_container_width=True): st.session_state.admin_step = 2; st.rerun()
+        with col_save:
+            if st.button("설정 저장 ✅", use_container_width=True, type="primary"): st.session_state.admin_step = 2; st.rerun()
 
+    # Step 4: 예약 및 기록 관리
     elif st.session_state.admin_step == 4:
         p_name = st.session_state.selected_pharmacy
-        st.title(f"📥 {p_name} 관리")
+        st.title(f"📥 {p_name} 예약/기록")
         tab1, tab2 = st.tabs(["대기 목록", "최근 조제 기록(20분)"])
         with tab1:
             my_orders = [o for o in st.session_state.pharmacy_orders if o['pharm_name'] == p_name]
@@ -197,6 +224,6 @@ elif st.session_state.role == "pharmacy":
                             st.rerun()
         with tab2:
             my_done = [o for o in st.session_state.completed_orders if o['pharm_name'] == p_name]
-            if not my_done: st.write("기록이 없습니다.")
-            else: st.table(pd.DataFrame(my_done)[['res_time', 'done_time', 'order_id']].rename(columns={'res_time':'예약','done_time':'완료','order_id':'ID'}))
+            if my_done: st.table(pd.DataFrame(my_done)[['res_time', 'done_time', 'order_id']].rename(columns={'res_time':'예약','done_time':'완료','order_id':'ID'}))
+        
         if st.button("⬅️ 메뉴로 돌아가기", use_container_width=True): st.session_state.admin_step = 2; st.rerun()

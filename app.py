@@ -22,13 +22,23 @@ if 'is_accepting' not in st.session_state:
     st.session_state.is_accepting = "예" 
 if 'pharmacy_orders' not in st.session_state:
     st.session_state.pharmacy_orders = []
+# #2 피드백 반영: 조제 완료 기록 저장소 및 시간 관리
+if 'completed_orders' not in st.session_state:
+    st.session_state.completed_orders = []
+if 'last_clear_time' not in st.session_state:
+    st.session_state.last_clear_time = time.time()
+
+# 20분마다 데이터 자동 삭제 로직 (1200초)
+current_time = time.time()
+if current_time - st.session_state.last_clear_time > 1200:
+    st.session_state.completed_orders = []
+    st.session_state.last_clear_time = current_time
 
 if 'pharm_config' not in st.session_state:
     st.session_state.pharm_config = {
         'T_avg': 7.0, 'P_staff': 2, 'W_time': 1.0, 'B_type': 5.0, 'N_offline': 0
     }
 
-# ETA 계산 알고리즘
 def calculate_eta(n_wait_total, config, w_complex=1.1):
     n_wait = n_wait_total + config['N_offline'] 
     numerator = n_wait * config['T_avg'] * config['W_time'] * w_complex
@@ -51,8 +61,6 @@ if st.session_state.role is None:
 
 # --- [A. 환자용 서비스] ---
 elif st.session_state.role == "patient":
-    # 사이드바 초기화 버튼 제거 반영 (요청 #2)
-
     if st.session_state.step == 1:
         st.title("💊 PharmFlow 팜플로우")
         st.write("내 시간에 맞는 약국으로")
@@ -120,10 +128,10 @@ elif st.session_state.role == "patient":
 
             me_df = pd.DataFrame({'lat': [my_lat], 'lon': [my_lon], 'label': ['Me']})
 
-            # 지도가 하얗게 뜨지 않도록 'road' 또는 'light' 스타일 적용 (요청 #3)
+            # 지도 코드 보존 (요청 사항)
             view_state = pdk.ViewState(latitude=my_lat, longitude=my_lon, zoom=14)
             st.pydeck_chart(pdk.Deck(
-                map_style='light', 
+                map_style='mapbox://styles/mapbox/light-v9',
                 initial_view_state=view_state,
                 layers=[
                     pdk.Layer("ScatterplotLayer", df, get_position='[lon, lat]', get_color='[255, 75, 75, 200]', get_radius=60),
@@ -142,8 +150,15 @@ elif st.session_state.role == "patient":
                     c1, c2 = st.columns([3, 1])
                     c1.markdown(f"### {df.iloc[i]['id']}. {df.iloc[i]['약국명']}")
                     c2.subheader(f"{df.iloc[i]['예상시간']}분")
-                    if st.button(f"{df.iloc[i]['id']}번 예약하기", key=f"bk_{i}", use_container_width=True):
-                        st.session_state.pharmacy_orders.append({"order_id": f"P-{np.random.randint(100,999)}", "time": time.strftime("%H:%M"), "status": "접수됨"})
+                    if st.button(f"{df.iloc[i]['id']}번 예약하기", key=f"book_{i}", use_container_width=True):
+                        # #1 피드백 반영: 환자가 버튼을 누른 실제 시간(예: 13:04)을 기록
+                        reservation_time = time.strftime("%H:%M")
+                        st.session_state.pharmacy_orders.append({
+                            "order_id": f"P-{np.random.randint(100,999)}",
+                            "pharm_name": df.iloc[i]['약국명'],
+                            "res_time": reservation_time, # 실제 예약 시간
+                            "status": "접수됨"
+                        })
                         st.session_state.reservation = df.iloc[i]
                         st.session_state.step = 4
                         st.rerun()
@@ -152,20 +167,14 @@ elif st.session_state.role == "patient":
         res = st.session_state.reservation
         st.balloons()
         st.success("✅ 조제 예약이 완료되었습니다!")
-        
-        # 누락된 UI 복구 반영 (요청 #1)
         with st.container(border=True):
             st.markdown(f"### ⏱️ **{res['예상시간']}분 후**")
             st.write("예약하신 약이 완료될 예정입니다.")
             st.write("---")
             st.warning("📍 약국에 도착하면 처방전을 데스크에 제출해주세요.")
             st.info(f"**[{res['id']}번 {res['약국명']}]** 조제 예약 완료")
-            
         if st.button("🏠 처음으로 돌아가기", use_container_width=True):
-            st.session_state.role = None
-            st.session_state.step = 1
-            st.session_state.reservation = None
-            st.rerun()
+            st.session_state.role = None; st.session_state.step = 1; st.session_state.reservation = None; st.rerun()
 
 # --- [B. 약국용 관리자 화면] ---
 elif st.session_state.role == "pharmacy":
@@ -210,19 +219,48 @@ elif st.session_state.role == "pharmacy":
 
     elif st.session_state.admin_step == 3:
         st.title(f"📥 {st.session_state.selected_pharmacy} 예약 목록")
-        if not st.session_state.pharmacy_orders:
-            # 요청 #2 반영: 예약이 없을 때 홈으로 이동 버튼 추가
-            st.info("현재 들어온 조제 요청이 없습니다.")
-            if st.button("🏠 처음으로 돌아가기 (홈 화면)", use_container_width=True):
-                st.session_state.role = None
-                st.session_state.admin_step = 1
+        
+        # #2 피드백 반영: 조제기록 보기 버튼 추가
+        col_view, col_home = st.columns(2)
+        with col_view:
+            if st.button("📋 조제기록 확인", use_container_width=True):
+                st.session_state.admin_step = 4
                 st.rerun()
+        with col_home:
+            if st.button("🏠 홈으로 이동", use_container_width=True):
+                st.session_state.role = None; st.session_state.admin_step = 1; st.rerun()
+
+        st.write("---")
+        
+        if not st.session_state.pharmacy_orders:
+            st.info("현재 들어온 조제 요청이 없습니다.")
         else:
             st.caption("✅ 환자로부터 조제 요청이 들어오면 목록에 표시됩니다.")
             for i, order in enumerate(st.session_state.pharmacy_orders):
                 with st.container(border=True):
                     c1, c2, c3 = st.columns([1, 2, 1])
-                    c1.write(f"ID: {order['order_id']}"); c2.write(f"접수: {order['time']}")
+                    c1.write(f"ID: {order['order_id']}")
+                    # #1 피드백 반영: 환자가 기입한 실제 예약 시간 표시
+                    c2.write(f"**예약 시간: {order['res_time']}**") 
                     if c3.button("조제 완료", key=f"done_{i}", use_container_width=True, type="primary"):
-                        st.session_state.pharmacy_orders.pop(i); st.rerun()
-        if st.button("⬅️ 설정 화면으로"): st.session_state.admin_step = 2; st.rerun()
+                        # 조제 기록으로 데이터 이동
+                        order['done_time'] = time.strftime("%H:%M")
+                        st.session_state.completed_orders.append(order)
+                        st.session_state.pharmacy_orders.pop(i)
+                        st.rerun()
+
+    # #2 피드백 반영: 조제 기록 대시보드 (20분 메모리)
+    elif st.session_state.admin_step == 4:
+        st.title(f"📜 {st.session_state.selected_pharmacy} 조제 완료 기록")
+        st.caption("🕒 본 기록은 최근 20분간의 내역만 보존됩니다.")
+        
+        if not st.session_state.completed_orders:
+            st.write("기록된 조제 완료 내역이 없습니다.")
+        else:
+            # 시간대 순으로 정렬하여 표시
+            completed_df = pd.DataFrame(st.session_state.completed_orders)
+            st.table(completed_df[['res_time', 'done_time', 'order_id']].rename(columns={'res_time':'예약시간', 'done_time':'완료시간'}))
+
+        if st.button("⬅️ 예약 목록으로 돌아가기", use_container_width=True):
+            st.session_state.admin_step = 3
+            st.rerun()

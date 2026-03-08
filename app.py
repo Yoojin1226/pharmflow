@@ -127,4 +127,5 @@ elif st.session_state.role == "patient":
                     pdk.Layer("ScatterplotLayer", df, get_position='[lon, lat]', get_color='[255, 75, 75, 200]', get_radius=60),
                     pdk.Layer("ScatterplotLayer", me_df, get_position='[lon, lat]', get_color='[0, 120, 255, 255]', get_radius=85),
                     pdk.Layer("TextLayer", df, get_position='[lon, lat]', get_text='id_str', get_size=24, get_color=[255, 255, 255], get_alignment_baseline="'center'"),
-                    pdk.Layer("TextLayer", me_df, get_position='[lon, lat]', get_text='label', get_size
+                    pdk.Layer("TextLayer", me_df, get_position='[lon, lat]', get_text='label', get_size)
+

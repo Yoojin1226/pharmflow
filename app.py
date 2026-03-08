@@ -37,7 +37,6 @@ if time.time() - st.session_state.last_clear_time > 1200:
 # --- [알고리즘: ETA 산출 함수] ---
 def calculate_pharm_eta(pharm_name, w_complex=1.1):
     config = st.session_state.pharm_db[pharm_name]
-    # 해당 약국 앞으로 온 온라인 예약 건수 필터링
     n_online = len([o for o in st.session_state.pharmacy_orders if o['pharm_name'] == pharm_name])
     n_wait = n_online + config['N_offline']
     numerator = n_wait * config['T_avg'] * config['W_time'] * w_complex
@@ -58,7 +57,6 @@ if st.session_state.role is None:
 
 # --- [A. 환자용 서비스] ---
 elif st.session_state.role == "patient":
-    # 예약 완료 전까지는 언제든 처음으로 돌아가기 버튼 노출 (사이드바)
     if st.session_state.step < 4:
         if st.sidebar.button("🏠 처음으로 돌아가기", use_container_width=True):
             st.session_state.role = None; st.session_state.step = 1; st.rerun()
@@ -87,14 +85,12 @@ elif st.session_state.role == "patient":
         my_lat, my_lon = 35.91, 127.07
         pharm_names = list(st.session_state.pharm_db.keys())
         
-        # 실시간 데이터베이스 연동 ETA 산출
         df_list = []
         for name in pharm_names:
             eta, _, _, _, _, _ = calculate_pharm_eta(name)
             df_list.append({'약국명': name, '예상시간': eta})
         
         df = pd.DataFrame(df_list)
-        # 지도 좌표 설정
         df['lat'] = my_lat + np.array([0.002, -0.002, 0.001, -0.001, 0.003, -0.003, 0.004])
         df['lon'] = my_lon + np.array([0.002, -0.002, 0.005, -0.004, 0.003, -0.005, 0.001])
         df = df.sort_values(by='예상시간').reset_index(drop=True)
@@ -111,7 +107,6 @@ elif st.session_state.role == "patient":
 
         for i in range(len(df)):
             p_name = df.iloc[i]['약국명']
-            # 약국이 수락 상태인 경우만 버튼 활성화
             if st.session_state.pharm_db[p_name]['is_accepting'] == "예":
                 with st.container(border=True):
                     c1, c2 = st.columns([3, 1])
@@ -123,14 +118,11 @@ elif st.session_state.role == "patient":
             else:
                 st.caption(f"⚪ {p_name} (현재 대기 상태입니다)")
 
-    # --- [ETA 산출 근거 증명 단계] ---
     elif st.session_state.step == 3.5:
         p_name = st.session_state.reservation['약국명']
         eta, n_wait, t_avg, w_time, p_staff, b_type = calculate_pharm_eta(p_name)
-        
         st.subheader("🧪 ETA 산출 근거 확인")
-        st.info(f"선택하신 **{p_name}**의 조제 시간은 실시간 약국 환경 변수를 대입하여 산출되었습니다.")
-        
+        st.info(f"선택하신 **{p_name}**의 조제 시간 산출 공식입니다.")
         col1, col2 = st.columns(2)
         with col1:
             st.write(f"- 실시간 대기($N_{{wait}}$): {n_wait}건")
@@ -138,13 +130,10 @@ elif st.session_state.role == "patient":
         with col2:
             st.write(f"- 조제 인력($P_{{staff}}$): {p_staff}명")
             st.write(f"- 보정 및 가중치: {w_time}배 / +{b_type}분")
-
         st.write("---")
         st.latex(r"ETA = \frac{N_{wait} \times T_{avg} \times W_{time} \times W_{complex}}{P_{staff}} + B_{type}")
         st.latex(rf"ETA = \frac{{{n_wait} \times {t_avg} \times {w_time} \times 1.1}}{{{p_staff}}} + {b_type} = {eta}분")
-        
         if st.button("위 산출 근거를 확인했으며, 조제를 요청합니다", use_container_width=True, type="primary"):
-            # 한국 시간(KST)으로 예약 기록
             res_time = get_kst_now().strftime("%H:%M")
             unique_id = f"P-{int(time.time() * 1000) % 1000000}"
             st.session_state.pharmacy_orders.append({
@@ -157,8 +146,6 @@ elif st.session_state.role == "patient":
         st.balloons(); st.success("✅ 조제 예약이 최종 완료되었습니다!")
         with st.container(border=True):
             st.markdown(f"### ⏱️ **{res['예상시간']}분 후**")
-            st.write("예약하신 약이 완료될 예정입니다.")
-            st.write("---")
             st.info(f"**[{res['약국명']}]** 조제 요청 완료")
         if st.button("🏠 처음으로 돌아가기", use_container_width=True):
             st.session_state.role = None; st.session_state.step = 1; st.rerun()
@@ -168,27 +155,34 @@ elif st.session_state.role == "pharmacy":
     if st.sidebar.button("🏠 로그아웃", use_container_width=True):
         st.session_state.role = None; st.session_state.admin_step = 1; st.rerun()
 
+    # Step 1: 약국 선택
     if st.session_state.admin_step == 1:
         st.title("👨‍⚕️ 약국 관리자")
         pharm_list = list(st.session_state.pharm_db.keys())
         selected = st.selectbox("관리하실 약국 선택", pharm_list)
         if st.button("관리 시작", use_container_width=True, type="primary"):
-            st.session_state.selected_pharmacy = selected; st.session_state.admin_step = 2; st.rerun()
+            st.session_state.selected_pharmacy = selected
+            st.session_state.admin_step = 2
+            st.rerun()
 
+    # Step 2: 메뉴 선택 (분리된 버튼 기능 복구)
     elif st.session_state.admin_step == 2:
         st.title(f"🏢 {st.session_state.selected_pharmacy} 관리")
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("⚙️ 약국 환경 설정", use_container_width=True, type="primary"): st.session_step = 2.5; st.rerun()
+            if st.button("⚙️ 약국 환경 설정", use_container_width=True, type="primary"):
+                st.session_state.admin_step = 3 # 환경설정 단계로 이동
+                st.rerun()
         with col2:
-            if st.button("📥 조제 예약 관리", use_container_width=True): st.session_step = 3; st.rerun()
+            if st.button("📥 조제 예약 관리", use_container_width=True):
+                st.session_state.admin_step = 4 # 예약관리 단계로 이동
+                st.rerun()
 
-    # 에러 수정된 환경 설정 단계 (AttributeError 해결 지점)
-    elif st.session_step == 2.5:
+    # Step 3: 환경 설정 (AttributeError 완벽 해결)
+    elif st.session_state.admin_step == 3:
         p_name = st.session_state.selected_pharmacy
         st.subheader("⚙️ 약국 환경 설정")
         with st.container(border=True):
-            # value에 pharm_config 대신 pharm_db의 현재 값을 대입하여 에러 해결
             st.session_state.pharm_db[p_name]['T_avg'] = st.number_input("평균 조제 시간(분)", value=st.session_state.pharm_db[p_name]['T_avg'])
             st.session_state.pharm_db[p_name]['P_staff'] = st.number_input("조제 인력 수", value=st.session_state.pharm_db[p_name]['P_staff'])
             status = st.select_slider("내부 혼잡도", options=["원활", "보통", "혼잡"])
@@ -198,9 +192,12 @@ elif st.session_state.role == "pharmacy":
             st.session_state.pharm_db[p_name]['W_time'] = 1.2 if is_peak else 1.0
 
         st.session_state.pharm_db[p_name]['is_accepting'] = st.radio("📡 조제 수락 여부", ["예", "아니오"], index=0 if st.session_state.pharm_db[p_name]['is_accepting']=="예" else 1)
-        if st.button("설정 저장 및 뒤로가기", use_container_width=True): st.session_step = 2; st.rerun()
+        if st.button("설정 저장 및 메뉴로 돌아가기", use_container_width=True):
+            st.session_state.admin_step = 2
+            st.rerun()
 
-    elif st.session_step == 3:
+    # Step 4: 조제 예약 및 조제 기록 (메모리 기능 통합)
+    elif st.session_state.admin_step == 4:
         p_name = st.session_state.selected_pharmacy
         st.title(f"📥 {p_name} 예약 및 기록")
         
@@ -210,7 +207,6 @@ elif st.session_state.role == "pharmacy":
             my_orders = [o for o in st.session_state.pharmacy_orders if o['pharm_name'] == p_name]
             if not my_orders:
                 st.info("현재 들어온 조제 요청이 없습니다.")
-                if st.button("🏠 홈으로 이동"): st.session_state.role = None; st.rerun()
             else:
                 for order in my_orders:
                     with st.container(border=True):
@@ -229,4 +225,6 @@ elif st.session_state.role == "pharmacy":
             else:
                 st.table(pd.DataFrame(my_done)[['res_time', 'done_time', 'order_id']].rename(columns={'res_time':'예약','done_time':'완료','order_id':'고유ID'}))
         
-        if st.button("⬅️ 메뉴로 돌아가기"): st.session_step = 2; st.rerun()
+        if st.button("⬅️ 메뉴로 돌아가기", use_container_width=True):
+            st.session_state.admin_step = 2
+            st.rerun()

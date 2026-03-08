@@ -127,5 +127,67 @@ elif st.session_state.role == "patient":
                     pdk.Layer("ScatterplotLayer", df, get_position='[lon, lat]', get_color='[255, 75, 75, 200]', get_radius=60),
                     pdk.Layer("ScatterplotLayer", me_df, get_position='[lon, lat]', get_color='[0, 120, 255, 255]', get_radius=85),
                     pdk.Layer("TextLayer", df, get_position='[lon, lat]', get_text='id_str', get_size=24, get_color=[255, 255, 255], get_alignment_baseline="'center'"),
-                    pdk.Layer("TextLayer", me_df, get_position='[lon, lat]', get_text='label', get_size)
+                    pdk.Layer("TextLayer", me_df, get_position='[lon, lat]', get_text='label', get_size=22, get_color=[255, 255, 255], get_alignment_baseline="'center'")
+                ]
+            ))
+            st.write("---")
+            if st.button("⬅️ 이전 단계 (처방 정보 확인)", use_container_width=True):
+                st.session_state.step = 2.5
+                st.rerun()
 
+            for i in range(len(df)):
+                with st.container(border=True):
+                    c1, c2 = st.columns([3, 1])
+                    c1.markdown(f"### {df.iloc[i]['id']}. {df.iloc[i]['약국명']}")
+                    c2.subheader(f"{df.iloc[i]['예상시간']}분")
+                    if st.button(f"{df.iloc[i]['id']}번 예약하기", key=f"bk_{i}", use_container_width=True):
+                        st.session_state.pharmacy_orders.append({"order_id": f"P-{np.random.randint(100,999)}", "time": time.strftime("%H:%M"), "status": "접수됨"})
+                        st.session_state.reservation = df.iloc[i]
+                        st.session_state.step = 4
+                        st.rerun()
+
+    elif st.session_state.step == 4:
+        res = st.session_state.reservation
+        st.balloons()
+        st.success("✅ 조제 예약이 완료되었습니다!")
+        st.info(f"**[{res['약국명']}]** {res['예상시간']}분 후 완료 예정")
+        if st.button("🏠 처음으로 돌아가기", use_container_width=True):
+            st.session_state.step = 1; st.session_state.reservation = None; st.rerun()
+
+# --- [B. 약국용 관리 대시보드] ---
+elif st.session_state.role == "pharmacy":
+    st.sidebar.button("🏠 초기화면으로", on_click=lambda: setattr(st.session_state, 'role', None))
+    st.title("👨‍⚕️ PharmFlow 관리자")
+    st.success("PharmFlow에 등록해주셔서 감사합니다.")
+
+    with st.expander("⚙️ 알고리즘 변수 및 약국 환경 설정", expanded=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.session_state.pharm_config['T_avg'] = st.number_input("평균 조제 시간(분)", value=7.0)
+            st.session_state.pharm_config['P_staff'] = st.number_input("조제 인력 수", value=2)
+            status = st.select_slider("내부 혼잡도 체크", options=["원활", "보통", "혼잡"])
+            status_map = {"원활": 0, "보통": 3, "혼잡": 6}
+            st.session_state.pharm_config['N_offline'] = status_map[status]
+        with col2:
+            st.session_state.pharm_config['B_type'] = st.selectbox("약국 유형 보정값", [5.0, 10.0, 2.0], 
+                                                                format_func=lambda x: "내과 (+5)" if x==5 else "대학병원 (+10)" if x==10 else "소아과 (+2)")
+            peak = st.checkbox("피크 시간대 가중치 적용 (1.2배)")
+            st.session_state.pharm_config['W_time'] = 1.2 if peak else 1.0
+
+    st.write("---")
+    accept_toggle = st.radio("📡 조제 요청을 받으시겠습니까?", ["예", "아니오"], horizontal=True)
+    st.session_state.is_accepting = (accept_toggle == "예")
+
+    st.subheader("📥 실시간 조제 예약 목록")
+    if not st.session_state.pharmacy_orders:
+        st.info("현재 들어온 요청이 없습니다.")
+    else:
+        st.caption("✅ 조제가 예약되었습니다.")
+        for i, order in enumerate(st.session_state.pharmacy_orders):
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([1, 2, 1])
+                c1.write(f"ID: {order['order_id']}")
+                c2.write(f"접수: {order['time']}")
+                if c3.button("조제 완료", key=f"done_{i}"):
+                    st.session_state.pharmacy_orders.pop(i)
+                    st.rerun()

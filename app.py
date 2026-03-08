@@ -7,7 +7,6 @@ import time
 # --- [1. 초기 설정 및 상태 관리] ---
 st.set_page_config(page_title="💊PharmFlow", layout="centered")
 
-# 세션 상태 초기화
 if 'role' not in st.session_state:
     st.session_state.role = None
 if 'step' not in st.session_state:
@@ -19,17 +18,11 @@ if 'is_accepting' not in st.session_state:
 if 'pharmacy_orders' not in st.session_state:
     st.session_state.pharmacy_orders = []
 
-# [약국 관리 변수 초기 설정] - 알고리즘 핵심 변수
 if 'pharm_config' not in st.session_state:
     st.session_state.pharm_config = {
-        'T_avg': 7.0,     # 평균 조제 시간
-        'P_staff': 2,     # 조제 인력 수
-        'W_time': 1.0,    # 시간대 가중치
-        'B_type': 5.0,    # 약국 유형 보정값
-        'N_offline': 0    # 오프라인 대기 보정
+        'T_avg': 7.0, 'P_staff': 2, 'W_time': 1.0, 'B_type': 5.0, 'N_offline': 0
     }
 
-# --- [정교한 ETA 계산 알고리즘 함수] ---
 def calculate_eta(n_wait_total, config, w_complex=1.1):
     n_wait = n_wait_total + config['N_offline'] 
     numerator = n_wait * config['T_avg'] * config['W_time'] * w_complex
@@ -40,7 +33,6 @@ def calculate_eta(n_wait_total, config, w_complex=1.1):
 if st.session_state.role is None:
     st.title("💊 PharmFlow 팜플로우")
     st.write("사용자 유형을 선택해 주세요.")
-    
     col1, col2 = st.columns(2)
     with col1:
         if st.button("🙋‍♂️ 환자용 서비스", use_container_width=True, type="primary"):
@@ -55,7 +47,6 @@ if st.session_state.role is None:
 elif st.session_state.role == "patient":
     st.sidebar.button("🏠 초기화면으로", on_click=lambda: setattr(st.session_state, 'role', None))
 
-    # #1 & #2. 메인 및 권한 동의
     if st.session_state.step == 1:
         st.title("💊 PharmFlow 팜플로우")
         st.write("내 시간에 맞는 약국으로")
@@ -66,7 +57,6 @@ elif st.session_state.role == "patient":
                 st.session_state.step = 2
                 st.rerun()
 
-    # #3 & #4. 업로드 및 분석
     elif st.session_state.step == 2:
         st.title("PharmFlow")
         st.info("💡 처방전을 찍어 올리면 조제 가능한 약국을 찾아드려요.")
@@ -86,7 +76,6 @@ elif st.session_state.role == "patient":
                     st.session_state.step = 1
                     st.rerun()
 
-    # #3.5. OCR 정보 확인
     elif st.session_state.step == 2.5:
         st.subheader("📋 처방전 정보 인식 결과")
         drug_info = pd.DataFrame({
@@ -95,7 +84,6 @@ elif st.session_state.role == "patient":
             "용법": ["1일 1회", "1일 2회", "필요 시"]
         })
         st.table(drug_info)
-        
         col1, col2 = st.columns(2)
         with col1:
             if st.button("정보 확인 완료", use_container_width=True, type="primary"):
@@ -106,7 +94,6 @@ elif st.session_state.role == "patient":
                 st.session_state.step = 2
                 st.rerun()
 
-    # #5 & #6. 지도 화면 및 약국 선택
     elif st.session_state.step == 3:
         if not st.session_state.is_accepting:
             st.error("현재 지역 약국들이 조제 예약을 받고 있지 않습니다.")
@@ -114,8 +101,6 @@ elif st.session_state.role == "patient":
         else:
             st.subheader("🔍 주변 약국 실시간 현황")
             my_lat, my_lon = 35.91, 127.07
-            
-            # [알고리즘 반영 데이터]
             current_online_queue = len(st.session_state.pharmacy_orders)
             eta_val = calculate_eta(current_online_queue, st.session_state.pharm_config)
 
@@ -134,13 +119,12 @@ elif st.session_state.role == "patient":
 
             me_df = pd.DataFrame({'lat': [my_lat], 'lon': [my_lon], 'label': ['Me']})
 
-            # 지도 레이어 (검은 배경 해결 및 번호/Me 표시 복구)
             view_state = pdk.ViewState(latitude=my_lat, longitude=my_lon, zoom=14)
-            
             st.pydeck_chart(pdk.Deck(
-                map_style='mapbox://styles/mapbox/light-v9', # 밝은 지도로 변경
+                map_style='mapbox://styles/mapbox/light-v9',
                 initial_view_state=view_state,
                 layers=[
                     pdk.Layer("ScatterplotLayer", df, get_position='[lon, lat]', get_color='[255, 75, 75, 200]', get_radius=60),
                     pdk.Layer("ScatterplotLayer", me_df, get_position='[lon, lat]', get_color='[0, 120, 255, 255]', get_radius=85),
-                    pdk.Layer("TextLayer", df, get_position='[lon, lat]', get_text='id_str', get_size=24, get_color=[255, 255, 255], get_alignment_baseline="'center'
+                    pdk.Layer("TextLayer", df, get_position='[lon, lat]', get_text='id_str', get_size=24, get_color=[255, 255, 255], get_alignment_baseline="'center'"),
+                    pdk.Layer("TextLayer", me_df, get_position='[lon, lat]', get_text='label', get_size

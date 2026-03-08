@@ -3,9 +3,16 @@ import pandas as pd
 import numpy as np
 import pydeck as pdk
 import time
+from datetime import datetime, timedelta, timezone
 
 # --- [1. 초기 설정 및 상태 관리] ---
 st.set_page_config(page_title="💊PharmFlow", layout="centered")
+
+# 한국 시간(KST) 설정을 위한 함수
+def get_kst_now():
+    # UTC 시간에 9시간을 더해 한국 시간을 산출합니다.
+    kst = timezone(timedelta(hours=9))
+    return datetime.now(kst)
 
 # 세션 상태 초기화
 if 'role' not in st.session_state:
@@ -27,7 +34,7 @@ if 'completed_orders' not in st.session_state:
 if 'last_clear_time' not in st.session_state:
     st.session_state.last_clear_time = time.time()
 
-# #2 피드백 반영: 20분마다 데이터 자동 삭제 로직 (1200초)
+# 20분마다 데이터 자동 삭제 로직
 current_time = time.time()
 if current_time - st.session_state.last_clear_time > 1200:
     st.session_state.completed_orders = []
@@ -52,14 +59,23 @@ if st.session_state.role is None:
     with col1:
         if st.button("🙋‍♂️ 환자용 서비스", use_container_width=True, type="primary"):
             st.session_state.role = "patient"
+            st.session_state.step = 1
             st.rerun()
     with col2:
         if st.button("👨‍⚕️ 약국용 관리자", use_container_width=True):
             st.session_state.role = "pharmacy"
+            st.session_state.admin_step = 1
             st.rerun()
 
 # --- [A. 환자용 서비스] ---
 elif st.session_state.role == "patient":
+    # #2 피드백 반영: 조제 완료(Step 4)를 제외한 모든 단계에서 '처음으로 돌아가기' 버튼 노출
+    if st.session_state.step < 4:
+        if st.sidebar.button("🏠 처음으로 돌아가기 (선택취소)", use_container_width=True):
+            st.session_state.role = None
+            st.session_state.step = 1
+            st.rerun()
+
     if st.session_state.step == 1:
         st.title("💊 PharmFlow 팜플로우")
         st.write("내 시간에 맞는 약국으로")
@@ -113,7 +129,6 @@ elif st.session_state.role == "patient":
         else:
             st.subheader("🔍 주변 약국 실시간 현황")
             my_lat, my_lon = 35.91, 127.07
-            # 해당 약국의 온라인 대기 건수만 카운트하여 ETA 계산
             current_pharm_queue = len([o for o in st.session_state.pharmacy_orders if o.get('pharm_name') == st.session_state.selected_pharmacy])
             eta_val = calculate_eta(current_pharm_queue, st.session_state.pharm_config)
 
@@ -151,13 +166,13 @@ elif st.session_state.role == "patient":
                     c1.markdown(f"### {df.iloc[i]['id']}. {df.iloc[i]['약국명']}")
                     c2.subheader(f"{df.iloc[i]['예상시간']}분")
                     if st.button(f"{df.iloc[i]['id']}번 예약하기", key=f"book_{i}", use_container_width=True):
-                        # #1 & #2 피드백 반영: 고유 ID 생성 및 정확한 약국명/시간 기록
+                        # #1 피드백 반영: 한국 시간(KST)으로 예약 시각 기록
                         unique_order_id = f"P-{int(time.time() * 1000) % 1000000}"
-                        reservation_time = time.strftime("%H:%M")
+                        reservation_time = get_kst_now().strftime("%H:%M") # 한국 시간 적용
                         
                         st.session_state.pharmacy_orders.append({
                             "order_id": unique_order_id,
-                            "pharm_name": df.iloc[i]['약국명'], # 클릭한 약국 이름을 정확히 저장
+                            "pharm_name": df.iloc[i]['약국명'],
                             "res_time": reservation_time,
                             "status": "접수됨"
                         })
@@ -180,6 +195,12 @@ elif st.session_state.role == "patient":
 
 # --- [B. 약국용 관리자 화면] ---
 elif st.session_state.role == "pharmacy":
+    # 관리자 화면에서도 사이드바 초기화 가능
+    if st.sidebar.button("🏠 초기화면으로 (로그아웃)", use_container_width=True):
+        st.session_state.role = None
+        st.session_state.admin_step = 1
+        st.rerun()
+
     if st.session_state.admin_step == 1:
         st.title("👨‍⚕️ PharmFlow 관리자 접속")
         pharm_list = ['삼례종로약국', '우석약국', '삼례정문약국', '중앙제일약국', '정성약국', '비비정약국', '삼례현대약국']
@@ -231,8 +252,6 @@ elif st.session_state.role == "pharmacy":
                 st.session_state.role = None; st.session_state.admin_step = 1; st.rerun()
 
         st.write("---")
-        
-        # #1 피드백 반영: 전체 예약 중 '현재 로그인한 약국'의 내역만 필터링
         my_orders = [o for o in st.session_state.pharmacy_orders if o['pharm_name'] == st.session_state.selected_pharmacy]
 
         if not my_orders:
@@ -242,28 +261,23 @@ elif st.session_state.role == "pharmacy":
             for order in my_orders:
                 with st.container(border=True):
                     c1, c2, c3 = st.columns([1, 2, 1])
-                    c1.write(f"**{order['order_id']}**") # 고유 ID 표시
+                    c1.write(f"**{order['order_id']}**")
                     c2.write(f"예약 시각: {order['res_time']}") 
                     if c3.button("조제 완료", key=f"done_{order['order_id']}", use_container_width=True, type="primary"):
-                        # 완료 기록 저장 및 전체 리스트에서 삭제
-                        order['done_time'] = time.strftime("%H:%M")
+                        # 완료 시간도 KST로 기록
+                        order['done_time'] = get_kst_now().strftime("%H:%M")
                         st.session_state.completed_orders.append(order)
-                        # 전체 리스트에서 ID가 일치하는 항목 제거
                         st.session_state.pharmacy_orders = [o for o in st.session_state.pharmacy_orders if o['order_id'] != order['order_id']]
                         st.rerun()
 
     elif st.session_state.admin_step == 4:
         st.title(f"📜 {st.session_state.selected_pharmacy} 조제 완료 기록")
         st.caption("🕒 최근 20분간의 기록만 보존됩니다.")
-        
-        # 완료 기록 중에서도 현재 약국의 내역만 표시
         my_completed = [o for o in st.session_state.completed_orders if o['pharm_name'] == st.session_state.selected_pharmacy]
-        
         if not my_completed:
             st.write("기록된 조제 완료 내역이 없습니다.")
         else:
             completed_df = pd.DataFrame(my_completed)
             st.table(completed_df[['res_time', 'done_time', 'order_id']].rename(columns={'res_time':'예약시간', 'done_time':'완료시간', 'order_id':'고유ID'}))
-
         if st.button("⬅️ 예약 목록으로 돌아가기", use_container_width=True):
             st.session_state.admin_step = 3; st.rerun()

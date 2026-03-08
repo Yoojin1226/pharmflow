@@ -8,11 +8,12 @@ from datetime import datetime, timedelta, timezone
 # --- [1. 초기 설정 및 상태 관리] ---
 st.set_page_config(page_title="💊PharmFlow", layout="centered")
 
+# 한국 시간(KST) 산출 함수
 def get_kst_now():
     kst = timezone(timedelta(hours=9))
     return datetime.now(kst)
 
-# [가상 데이터베이스] 7개 약국의 환경 설정을 통합 관리
+# [가상 데이터베이스] 7개 약국의 환경 설정을 중앙에서 관리
 if 'pharm_db' not in st.session_state:
     pharm_list = ['삼례종로약국', '우석약국', '삼례정문약국', '중앙제일약국', '정성약국', '비비정약국', '삼례현대약국']
     st.session_state.pharm_db = {name: {
@@ -28,7 +29,7 @@ if 'pharmacy_orders' not in st.session_state: st.session_state.pharmacy_orders =
 if 'completed_orders' not in st.session_state: st.session_state.completed_orders = []
 if 'last_clear_time' not in st.session_state: st.session_state.last_clear_time = time.time()
 
-# 20분 메모리 자동 삭제 로직
+# 20분 메모리 자동 삭제 로직 (1200초)
 if time.time() - st.session_state.last_clear_time > 1200:
     st.session_state.completed_orders = []
     st.session_state.last_clear_time = time.time()
@@ -36,6 +37,7 @@ if time.time() - st.session_state.last_clear_time > 1200:
 # --- [알고리즘: ETA 산출 함수] ---
 def calculate_pharm_eta(pharm_name, w_complex=1.1):
     config = st.session_state.pharm_db[pharm_name]
+    # 해당 약국 앞으로 온 온라인 예약 건수 필터링
     n_online = len([o for o in st.session_state.pharmacy_orders if o['pharm_name'] == pharm_name])
     n_wait = n_online + config['N_offline']
     numerator = n_wait * config['T_avg'] * config['W_time'] * w_complex
@@ -56,6 +58,7 @@ if st.session_state.role is None:
 
 # --- [A. 환자용 서비스] ---
 elif st.session_state.role == "patient":
+    # 예약 완료 전까지는 언제든 처음으로 돌아가기 버튼 노출 (사이드바)
     if st.session_state.step < 4:
         if st.sidebar.button("🏠 처음으로 돌아가기", use_container_width=True):
             st.session_state.role = None; st.session_state.step = 1; st.rerun()
@@ -84,113 +87,7 @@ elif st.session_state.role == "patient":
         my_lat, my_lon = 35.91, 127.07
         pharm_names = list(st.session_state.pharm_db.keys())
         
-        # 실시간 DB 연동 ETA 계산
+        # 실시간 데이터베이스 연동 ETA 산출
         df_list = []
         for name in pharm_names:
-            eta, _, _, _, _, _ = calculate_pharm_eta(name)
-            df_list.append({'약국명': name, '예상시간': eta})
-        
-        df = pd.DataFrame(df_list)
-        df['lat'] = my_lat + np.array([0.002, -0.002, 0.001, -0.001, 0.003, -0.003, 0.004])
-        df['lon'] = my_lon + np.array([0.002, -0.002, 0.005, -0.004, 0.003, -0.005, 0.001])
-        df = df.sort_values(by='예상시간').reset_index(drop=True)
-        df['id'] = range(1, 8)
-
-        st.pydeck_chart(pdk.Deck(
-            map_style='mapbox://styles/mapbox/light-v9',
-            initial_view_state=pdk.ViewState(latitude=my_lat, longitude=my_lon, zoom=14),
-            layers=[
-                pdk.Layer("ScatterplotLayer", df, get_position='[lon, lat]', get_color='[255, 75, 75, 200]', get_radius=60),
-                pdk.Layer("TextLayer", df, get_position='[lon, lat]', get_text='id', get_size=24, get_color=[255, 255, 255], get_alignment_baseline="'center'")
-            ]
-        ))
-
-        for i in range(len(df)):
-            p_name = df.iloc[i]['약국명']
-            if st.session_state.pharm_db[p_name]['is_accepting'] == "예":
-                with st.container(border=True):
-                    c1, c2 = st.columns([3, 1])
-                    c1.markdown(f"### {df.iloc[i]['id']}. {p_name}")
-                    c2.subheader(f"{df.iloc[i]['예상시간']}분")
-                    if st.button(f"{df.iloc[i]['id']}번 약국 선택", key=f"sel_{i}", use_container_width=True):
-                        st.session_state.reservation = df.iloc[i]
-                        st.session_state.step = 3.5 # ETA 산출 근거 화면으로 이동
-                        st.rerun()
-
-    # --- [신규: ETA 산출 근거 증명 화면] ---
-    elif st.session_state.step == 3.5:
-        p_name = st.session_state.reservation['약국명']
-        eta, n_wait, t_avg, w_time, p_staff, b_type = calculate_pharm_eta(p_name)
-        
-        st.subheader("🧪 ETA 기술 논리성 검증 (IR)")
-        st.info(f"선택하신 **{p_name}**의 조제 완료 시간은 아래의 실시간 변수를 통해 산출되었습니다.")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write("**시스템 입력 변수**")
-            st.write(f"- 실시간 대기($N_{{wait}}$): {n_wait}건")
-            st.write(f"- 평균 조제 시간($T_{{avg}}$): {t_avg}분")
-            st.write(f"- 조제 인력($P_{{staff}}$): {p_staff}명")
-        with col2:
-            st.write("**가중치 및 보정값**")
-            st.write(f"- 시간대 가중치($W_{{time}}$): {w_time}배")
-            st.write(f"- 처방 복잡도($W_{{complex}}$): 1.1배")
-            st.write(f"- 약국 유형 보정($B_{{type}}$): {b_type}분")
-
-        st.write("---")
-        st.write("**산출 공식 (Algorithm)**")
-        st.latex(r"ETA = \frac{N_{wait} \times T_{avg} \times W_{time} \times W_{complex}}{P_{staff}} + B_{type}")
-        st.latex(rf"ETA = \frac{{{n_wait} \times {t_avg} \times {w_time} \times 1.1}}{{{p_staff}}} + {b_type} = {eta}분")
-        
-        if st.button("위 논리적 근거를 확인했으며, 예약을 확정합니다", use_container_width=True, type="primary"):
-            res_time = get_kst_now().strftime("%H:%M")
-            st.session_state.pharmacy_orders.append({
-                "order_id": f"P-{int(time.time()%10000)}", "pharm_name": p_name, "res_time": res_time, "status": "접수됨"
-            })
-            st.session_state.step = 4; st.rerun()
-        if st.button("⬅️ 약국 다시 고르기", use_container_width=True): st.session_state.step = 3; st.rerun()
-
-    elif st.session_state.step == 4:
-        st.balloons(); st.success("✅ 조제 예약이 최종 완료되었습니다!"); st.session_state.step = 1; st.session_state.role = None
-
-# --- [B. 약국용 관리자 화면] ---
-elif st.session_state.role == "pharmacy":
-    if st.sidebar.button("🏠 로그아웃", use_container_width=True): st.session_state.role = None; st.session_state.admin_step = 1; st.rerun()
-
-    # Step 1: 약국 선택
-    if st.session_state.admin_step == 1:
-        st.title("👨‍⚕️ 약국 관리자")
-        selected = st.selectbox("관리하실 약국 선택", list(st.session_state.pharm_db.keys()))
-        if st.button("관리 시작", use_container_width=True, type="primary"):
-            st.session_state.selected_pharmacy = selected; st.session_state.admin_step = 2; st.rerun()
-
-    # Step 2: 메뉴 선택 (요청 반영)
-    elif st.session_state.admin_step == 2:
-        st.title(f"🏢 {st.session_state.selected_pharmacy} 관리")
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("⚙️ 약국 환경 설정", use_container_width=True, type="primary"): st.session_state.admin_step = 3; st.rerun()
-        with col2:
-            if st.button("📥 조제 예약 관리", use_container_width=True): st.session_state.admin_step = 4; st.rerun()
-
-    # Step 3: 환경 설정 (요청 반영)
-    elif st.session_state.admin_step == 3:
-        p_name = st.session_state.selected_pharmacy
-        st.subheader("⚙️ 약국 환경 설정")
-        with st.container(border=True):
-            st.session_state.pharm_db[p_name]['T_avg'] = st.number_input("평균 조제 시간(분)", value=st.session_state.pharm_config['T_avg'])
-            st.session_state.pharm_db[p_name]['P_staff'] = st.number_input("조제 인력 수", value=st.session_state.pharm_config['P_staff'])
-            status = st.select_slider("내부 혼잡도", options=["원활", "보통", "혼잡"])
-            st.session_state.pharm_db[p_name]['N_offline'] = {"원활":0, "보통":3, "혼잡":6}[status]
-            st.session_state.pharm_db[p_name]['B_type'] = st.selectbox("약국 유형", [5.0, 10.0, 2.0], format_func=lambda x: "내과(+5)" if x==5 else "대학병원(+10)" if x==10 else "소아과(+2)")
-            st.session_state.pharm_db[p_name]['W_time'] = 1.2 if st.checkbox("피크 가중치 적용") else 1.0
-        st.session_state.pharm_db[p_name]['is_accepting'] = st.radio("📡 조제 수락 여부", ["예", "아니오"])
-        if st.button("설정 저장 및 뒤로가기", use_container_width=True): st.session_state.admin_step = 2; st.rerun()
-
-    # Step 4: 조제 예약 및 조제 기록 (요청 반영)
-    elif st.session_step == 4:
-        st.subheader("📥 조제 예약 및 기록 관리")
-        # (기존 조제 예약 목록 및 조제 기록 로직 통합...)
-        my_orders = [o for o in st.session_state.pharmacy_orders if o['pharm_name'] == st.session_state.selected_pharmacy]
-        # (중략 - 기존 목록 및 완료 기록 테이블 코드)
-        if st.button("⬅️ 메뉴로 돌아가기", use_container_width=True): st.session_state.admin_step = 2; st.rerun()
+            eta, _, _, _, _, _ = calculate_pharm_eta(

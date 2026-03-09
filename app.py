@@ -13,10 +13,9 @@ def get_kst_now():
     kst = timezone(timedelta(hours=9))
     return datetime.now(kst)
 
-# [가상 데이터베이스] 중앙 관리 시스템
+# [가상 데이터베이스] 중앙 관리 시스템 - N_offline 초기값을 엄격히 0으로 설정
 if 'pharm_db' not in st.session_state:
     pharm_list = ['삼례종로약국', '우석약국', '삼례정문약국', '중앙제일약국', '정성약국', '비비정약국', '삼례현대약국']
-    # 초기 N_offline을 0으로 설정하여 예약 전에는 무조건 0이 나오도록 설정
     st.session_state.pharm_db = {name: {
         'T_avg': 7.0, 'P_staff': 2, 'W_time': 1.0, 'B_type': 5.0, 'N_offline': 0, 'is_accepting': "예"
     } for name in pharm_list}
@@ -30,15 +29,15 @@ if 'pharmacy_orders' not in st.session_state: st.session_state.pharmacy_orders =
 if 'completed_orders' not in st.session_state: st.session_state.completed_orders = []
 if 'last_clear_time' not in st.session_state: st.session_state.last_clear_time = time.time()
 
-# 20분 메모리 삭제 로직
+# 20분 메모리 자동 삭제 로직
 if time.time() - st.session_state.last_clear_time > 1200:
     st.session_state.completed_orders = []
     st.session_state.last_clear_time = time.time()
 
-# ETA 범위 산출 함수
+# --- [#3 피드백 반영: ETA 범위 산출 함수] ---
 def calculate_pharm_eta(pharm_name, w_complex=1.1):
     config = st.session_state.pharm_db[pharm_name]
-    # 해당 약국에 조제 완료되지 않은 예약 건수만 정확히 필터링
+    # #4 피드백 반영: 해당 약국에 조제 완료되지 않은 예약 건수만 정확히 필터링
     my_active_orders = [o for o in st.session_state.pharmacy_orders if o['pharm_name'] == pharm_name]
     n_online = len(my_active_orders)
     n_wait = n_online + config['N_offline']
@@ -46,7 +45,7 @@ def calculate_pharm_eta(pharm_name, w_complex=1.1):
     numerator = n_wait * config['T_avg'] * config['W_time'] * w_complex
     eta_raw = (numerator / config['P_staff']) + config['B_type']
     
-    # 범위로 표현 (6.7분 -> 6~7분)
+    # #3 피드백 반영: 범위로 표현 (예: 6.7분 -> 6~7분)
     if eta_raw % 1 == 0:
         eta_str = str(int(eta_raw))
     else:
@@ -68,6 +67,7 @@ if st.session_state.role is None:
 
 # --- [A. 환자용 서비스] ---
 elif st.session_state.role == "patient":
+    # #2 피드백 반영: 로그아웃 창 항상 닫아둠
     with st.sidebar.expander("로그아웃", expanded=False):
         if st.button("🏠 처음으로 돌아가기", use_container_width=True):
             st.session_state.role = None; st.session_state.step = 1; st.rerun()
@@ -95,6 +95,7 @@ elif st.session_state.role == "patient":
         st.subheader("🔍 주변 약국 실시간 현황")
         my_lat, my_lon = 35.91, 127.07
         pharm_names = list(st.session_state.pharm_db.keys())
+        
         df_list = []
         for name in pharm_names:
             eta_s, _, _, _, _, _ = calculate_pharm_eta(name)
@@ -107,10 +108,11 @@ elif st.session_state.role == "patient":
         df['id_str'] = df['id'].astype(str)
         me_df = pd.DataFrame({'lat': [my_lat], 'lon': [my_lon], 'label': ['Me']})
 
-        # 지도 스타일 보존
+        # #2 피드백 반영: 지도 바탕 오류 해결 (가장 안정적인 'light' 스타일 적용)
+        view_state = pdk.ViewState(latitude=my_lat, longitude=my_lon, zoom=14)
         st.pydeck_chart(pdk.Deck(
-            map_style='mapbox://styles/mapbox/light-v9',
-            initial_view_state=pdk.ViewState(latitude=my_lat, longitude=my_lon, zoom=14),
+            map_style='light', 
+            initial_view_state=view_state,
             layers=[
                 pdk.Layer("ScatterplotLayer", df, get_position='[lon, lat]', get_color='[255, 75, 75, 200]', get_radius=60),
                 pdk.Layer("ScatterplotLayer", me_df, get_position='[lon, lat]', get_color='[0, 120, 255, 255]', get_radius=85),
@@ -145,10 +147,12 @@ elif st.session_state.role == "patient":
         st.write("---")
         st.latex(r"ETA = \frac{N_{wait} \times T_{avg} \times W_{time} \times W_{complex}}{P_{staff}} + B_{type}")
         st.latex(rf"ETA = \frac{{{n_wait} \times {t_avg} \times {w_time} \times 1.1}}{{{p_staff}}} + {b_type} = {eta_s}분")
+        
         if st.button("위 산출 근거를 확인했으며, 조제를 요청합니다", use_container_width=True, type="primary"):
             res_time = get_kst_now().strftime("%H:%M")
+            unique_id = f"P-{int(time.time()*1000)%1000000}"
             st.session_state.pharmacy_orders.append({
-                "order_id": f"P-{int(time.time()*1000)%1000000}", "pharm_name": p_name, "res_time": res_time, "status": "접수됨"
+                "order_id": unique_id, "pharm_name": p_name, "res_time": res_time, "status": "접수됨"
             })
             st.session_state.step = 4; st.rerun()
 
@@ -184,11 +188,9 @@ elif st.session_state.role == "pharmacy":
         st.title(f"🏢 {st.session_state.selected_pharmacy} 관리")
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("⚙️ 약국 환경 설정", use_container_width=True, type="primary"):
-                st.session_state.admin_step = 3; st.rerun()
+            if st.button("⚙️ 약국 환경 설정", use_container_width=True, type="primary"): st.session_state.admin_step = 3; st.rerun()
         with col2:
-            if st.button("📥 조제 예약 관리", use_container_width=True):
-                st.session_state.admin_step = 4; st.rerun() # 오류 수정 완료
+            if st.button("📥 조제 예약 관리", use_container_width=True): st.session_state.admin_step = 4; st.rerun()
         if st.button("⬅️ 약국 다시 선택", use_container_width=True): st.session_state.admin_step = 1; st.rerun()
 
     elif st.session_state.admin_step == 3:
@@ -201,7 +203,6 @@ elif st.session_state.role == "pharmacy":
             status_map = {"원활": 0, "보통": 3, "혼잡": 6}; st.session_state.pharm_db[p_name]['N_offline'] = status_map[status]
             st.session_state.pharm_db[p_name]['B_type'] = st.selectbox("약국 유형", [5.0, 10.0, 2.0], format_func=lambda x: "내과(+5)" if x==5 else "대학병원(+10)" if x==10 else "소아과(+2)")
             st.session_state.pharm_db[p_name]['W_time'] = 1.2 if st.checkbox("피크 가중치 적용") else 1.0
-        
         c_b, c_s = st.columns(2)
         with c_b:
             if st.button("⬅️ 메뉴로 돌아가기", use_container_width=True): st.session_state.admin_step = 2; st.rerun()

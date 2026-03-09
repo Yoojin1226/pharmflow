@@ -12,6 +12,7 @@ def get_kst_now():
     kst = timezone(timedelta(hours=9))
     return datetime.now(kst)
 
+# [가상 데이터베이스] 모든 탭과 역할이 공유하는 중앙 저장소
 if 'pharm_db' not in st.session_state:
     pharm_list = ['삼례종로약국', '우석약국', '삼례정문약국', '중앙제일약국', '정성약국', '비비정약국', '삼례현대약국']
     st.session_state.pharm_db = {name: {
@@ -27,6 +28,7 @@ if 'pharmacy_orders' not in st.session_state: st.session_state.pharmacy_orders =
 if 'completed_orders' not in st.session_state: st.session_state.completed_orders = []
 if 'last_clear_time' not in st.session_state: st.session_state.last_clear_time = time.time()
 
+# 20분 메모리 삭제 (시작 시점 기준)
 if time.time() - st.session_state.last_clear_time > 1200:
     st.session_state.completed_orders = []
     st.session_state.last_clear_time = time.time()
@@ -34,9 +36,11 @@ if time.time() - st.session_state.last_clear_time > 1200:
 # --- [알고리즘: ETA 및 도보 시간 산출] ---
 def calculate_pharm_eta(pharm_name, w_complex=1.1):
     config = st.session_state.pharm_db[pharm_name]
+    # 필터링 로직 강화: 정확한 약국 이름 매칭
     my_active_orders = [o for o in st.session_state.pharmacy_orders if o['pharm_name'] == pharm_name]
     n_online = len(my_active_orders)
     n_wait = n_online + config['N_offline']
+    
     numerator = n_wait * config['T_avg'] * config['W_time'] * w_complex
     eta_raw = (numerator / config['P_staff']) + config['B_type']
     
@@ -46,7 +50,7 @@ def calculate_pharm_eta(pharm_name, w_complex=1.1):
 
 def get_walking_time(lat1, lon1, lat2, lon2):
     dist = np.sqrt((lat1 - lat2)**2 + (lon1 - lon2)**2) * 111000 
-    walking_min = dist / 67 # 4km/h 기준 분당 약 67m
+    walking_min = dist / 67 # 4km/h 기준
     return int(walking_min)
 
 # --- [메인 진입로] ---
@@ -63,10 +67,10 @@ if st.session_state.role is None:
 
 # --- [A. 환자용 서비스] ---
 elif st.session_state.role == "patient":
-    if st.session_state.step < 4:
-        with st.sidebar.expander("로그아웃", expanded=False):
-            if st.button("🏠 처음으로 돌아가기", use_container_width=True):
-                st.session_state.role = None; st.session_state.step = 1; st.rerun()
+    # 로그아웃 창은 항상 닫혀 있도록 설정 (expanded=False)
+    with st.sidebar.expander("로그아웃", expanded=False):
+        if st.button("🏠 처음으로 돌아가기", use_container_width=True):
+            st.session_state.role = None; st.session_state.step = 1; st.rerun()
 
     if st.session_state.step == 1:
         st.title("💊 PharmFlow")
@@ -87,10 +91,10 @@ elif st.session_state.role == "patient":
         st.table(drug_info)
         if st.button("정보 확인 완료", use_container_width=True, type="primary"): st.session_state.step = 3; st.rerun()
 
-    # #1 피드백 반영: 제목 변경 및 스마트 라우팅 적용
+    # #1 피드백 반영: 최적 경로 찾기
     elif st.session_state.step == 3:
         st.subheader("🔍 인근 약국 최적 경로 찾기")
-        st.caption("🚶‍♂️도보 이동 시간과 ⏱️조제 예상 시간을 합산하여 최적의 경로를 추천합니다.")
+        st.caption("🚶‍♂️도보 이동 시간과 ⏱️조제 예상 시간을 합산하여 가장 빠른 경로를 추천합니다.")
         
         my_lat, my_lon = 35.91, 127.07
         pharm_names = list(st.session_state.pharm_db.keys())
@@ -111,9 +115,10 @@ elif st.session_state.role == "patient":
         df['id_str'] = df['id'].astype(str)
         me_df = pd.DataFrame({'lat': [my_lat], 'lon': [my_lon], 'label': ['Me']})
 
-        # 지도 레이어 고정
+        # 지도 레이어 완벽 복구
+        view_state = pdk.ViewState(latitude=my_lat, longitude=my_lon, zoom=14)
         st.pydeck_chart(pdk.Deck(
-            map_style='light', initial_view_state=pdk.ViewState(latitude=my_lat, longitude=my_lon, zoom=14),
+            map_style='light', initial_view_state=view_state,
             layers=[
                 pdk.Layer("ScatterplotLayer", df, get_position='[lon, lat]', get_color='[255, 75, 75, 200]', get_radius=60),
                 pdk.Layer("ScatterplotLayer", me_df, get_position='[lon, lat]', get_color='[0, 120, 255, 255]', get_radius=85),
@@ -131,20 +136,19 @@ elif st.session_state.role == "patient":
                         st.markdown(f"### {df.iloc[i]['id']}. {p_name}")
                         st.caption(f"🚶‍♂️ 도보 약 {df.iloc[i]['도보시간']}분 | ⏱️ 조제 약 {df.iloc[i]['조제시간']}분")
                     with c2:
-                        st.subheader(f"총 {int(df.iloc[i]['총소요시간'])}분 예상")
+                        st.subheader(f"합계 {int(df.iloc[i]['총소요시간'])}분")
                         if st.button(f"{df.iloc[i]['id']}번 약국 선택", key=f"sel_{i}", use_container_width=True):
                             st.session_state.reservation = df.iloc[i]; st.session_state.step = 3.5; st.rerun()
 
-    # #2 피드백 반영: 조제 산출식 유지 + 총 소요시간 산출식 추가
+    # #2 피드백 반영: 산출식 화면 구성
     elif st.session_state.step == 3.5:
         res = st.session_state.reservation
         p_name = res['약국명']
         _, eta_s, n_w, t_a, w_t, p_s, b_t = calculate_pharm_eta(p_name)
         
-        st.subheader("🧪 기술 논리성 및 산출 근거 확인")
-        st.info("실시간 약국 환경 변수와 이동 동선을 결합한 최적 시간 계산식입니다.")
+        st.subheader("🧪 기술 논리성 및 산출 근거")
+        st.info("이동 시간과 조제 부하를 결합한 최적 경로 산출 로직입니다.")
         
-        # 1. 조제 예상 시간 산출식 (기존 유지)
         st.markdown("#### [1] 조제 예상 시간 ($ETA$) 산출")
         col1, col2 = st.columns(2)
         with col1:
@@ -159,17 +163,18 @@ elif st.session_state.role == "patient":
         st.latex(rf"ETA = \frac{{{n_w} \times {t_a} \times {w_t} \times 1.1}}{{{p_s}}} + {b_t} = {eta_s}분")
         
         st.write("---")
-        
-        # 2. 총 소요시간 산출식 (신규 추가)
         st.markdown("#### [2] 최종 소요 시간 ($Total$) 산출")
-        st.write(f"- 🚶‍♂️ 내 위치로부터 도보 이동 시간: 약 **{res['도보시간']}분**")
         st.latex(r"Total = Walking\_Time + ETA")
         st.latex(rf"Total = {res['도보시간']}분 + {eta_s}분 = {int(res['총소요시간'])}분")
         
         if st.button("위 산출 근거를 확인했으며, 조제를 요청합니다", use_container_width=True, type="primary"):
             res_time = get_kst_now().strftime("%H:%M")
+            # 데이터 저장 로직 강화
             st.session_state.pharmacy_orders.append({
-                "order_id": f"P-{int(time.time()*1000)%1000000}", "pharm_name": p_name, "res_time": res_time, "status": "접수됨"
+                "order_id": f"P-{int(time.time()*1000)%1000000}", 
+                "pharm_name": p_name, 
+                "res_time": res_time, 
+                "status": "접수됨"
             })
             st.session_state.step = 4; st.rerun()
         if st.button("⬅️ 약국 다시 선택하기", use_container_width=True): st.session_state.step = 3; st.rerun()
@@ -182,19 +187,26 @@ elif st.session_state.role == "patient":
             st.write("예약하신 약이 완료될 예정입니다.")
             st.write("---")
             st.warning("📍 약국에 도착하면 처방전을 데스크에 제출해주세요.")
-            st.info(f"**[{res['약국명']}]** 조제 예약 완료 (총 {int(res['총소요시간'])}분 소요 예상)")
+            st.info(f"**[{res['약국명']}]** 조제 예약 완료")
         if st.button("🏠 처음으로 돌아가기", use_container_width=True):
             st.session_state.role = None; st.session_state.step = 1; st.rerun()
 
-# --- [B. 약국용 관리자 화면 - 기존 로직 100% 보존] ---
+# --- [B. 약국용 관리자 화면 - 데이터 연동 버그 수정] ---
 elif st.session_state.role == "pharmacy":
     with st.sidebar.expander("로그아웃", expanded=False):
-        if st.button("로그아웃", use_container_width=True): st.session_state.role = None; st.session_state.admin_step = 1; st.rerun()
+        if st.button("로그아웃", use_container_width=True):
+            st.session_state.role = None; st.session_state.admin_step = 1; st.rerun()
+
     if st.session_state.admin_step == 1:
         st.title("👨‍⚕️ 약국 관리자")
         selected = st.selectbox("관리하실 약국 선택", list(st.session_state.pharm_db.keys()))
-        if st.button("관리 시작 ➡️", use_container_width=True, type="primary"):
-            st.session_state.selected_pharmacy = selected; st.session_state.admin_step = 2; st.rerun()
+        col_p, col_n = st.columns(2)
+        with col_p:
+            if st.button("⬅️ 초기 화면", use_container_width=True): st.session_state.role = None; st.rerun()
+        with col_n:
+            if st.button("관리 시작 ➡️", use_container_width=True, type="primary"):
+                st.session_state.selected_pharmacy = selected; st.session_state.admin_step = 2; st.rerun()
+
     elif st.session_state.admin_step == 2:
         st.title(f"🏢 {st.session_state.selected_pharmacy} 관리")
         col1, col2 = st.columns(2)
@@ -202,26 +214,49 @@ elif st.session_state.role == "pharmacy":
             if st.button("⚙️ 약국 환경 설정", use_container_width=True, type="primary"): st.session_state.admin_step = 3; st.rerun()
         with col2:
             if st.button("📥 조제 예약 관리", use_container_width=True): st.session_state.admin_step = 4; st.rerun()
+        if st.button("⬅️ 약국 다시 선택", use_container_width=True): st.session_state.admin_step = 1; st.rerun()
+
     elif st.session_state.admin_step == 3:
         p_name = st.session_state.selected_pharmacy
+        st.subheader("⚙️ 약국 환경 설정")
         with st.container(border=True):
             st.session_state.pharm_db[p_name]['T_avg'] = st.number_input("평균 조제 시간(분)", value=st.session_state.pharm_db[p_name]['T_avg'])
             st.session_state.pharm_db[p_name]['P_staff'] = st.number_input("조제 인력 수", value=st.session_state.pharm_db[p_name]['P_staff'])
-            st.session_state.pharm_db[p_name]['N_offline'] = {"원활":0, "보통":3, "혼잡":6}[st.select_slider("내부 혼잡도", options=["원활", "보통", "혼잡"])]
+            status = st.select_slider("내부 혼잡도", options=["원활", "보통", "혼잡"])
+            status_map = {"원활": 0, "보통": 3, "혼잡": 6}; st.session_state.pharm_db[p_name]['N_offline'] = status_map[status]
             st.session_state.pharm_db[p_name]['B_type'] = st.selectbox("약국 유형", [5.0, 10.0, 2.0], format_func=lambda x: "내과(+5)" if x==5 else "대학병원(+10)" if x==10 else "소아과(+2)")
             st.session_state.pharm_db[p_name]['W_time'] = 1.2 if st.checkbox("피크 가중치 적용") else 1.0
-        if st.button("설정 저장 ✅", use_container_width=True, type="primary"): st.session_state.admin_step = 2; st.rerun()
+        
+        c_b, c_s = st.columns(2)
+        with c_b:
+            if st.button("⬅️ 메뉴로 돌아가기", use_container_width=True): st.session_state.admin_step = 2; st.rerun()
+        with c_s:
+            if st.button("설정 저장 ✅", use_container_width=True, type="primary"): st.session_state.admin_step = 2; st.rerun()
+
     elif st.session_state.admin_step == 4:
         p_name = st.session_state.selected_pharmacy
-        tab1, tab2 = st.tabs(["대기 목록", "최근 조제 기록"])
+        st.title(f"📥 {p_name} 예약 및 기록")
+        tab1, tab2 = st.tabs(["대기 목록", "최근 조제 기록(20분)"])
+        
         with tab1:
+            # 실시간 연동 핵심 필터
             my_orders = [o for o in st.session_state.pharmacy_orders if o['pharm_name'] == p_name]
-            for order in my_orders:
-                with st.container(border=True):
-                    c1, c2, c3 = st.columns([1, 2, 1])
-                    c1.write(f"**{order['order_id']}**"); c2.write(f"예약: {order['res_time']}")
-                    if c3.button("조제 완료", key=f"d_{order['order_id']}"):
-                        order['done_time'] = get_kst_now().strftime("%H:%M")
-                        st.session_state.completed_orders.append(order)
-                        st.session_state.pharmacy_orders = [o for o in st.session_state.pharmacy_orders if o['order_id'] != order['order_id']]; st.rerun()
-        if st.button("⬅️ 메뉴로 돌아가기"): st.session_state.admin_step = 2; st.rerun()
+            if not my_orders:
+                st.info("현재 들어온 조제 요청이 없습니다.")
+            else:
+                for order in my_orders:
+                    with st.container(border=True):
+                        c1, c2, c3 = st.columns([1, 2, 1])
+                        c1.write(f"**{order['order_id']}**"); c2.write(f"예약: {order['res_time']}")
+                        if c3.button("조제 완료", key=f"d_{order['order_id']}", use_container_width=True, type="primary"):
+                            order['done_time'] = get_kst_now().strftime("%H:%M")
+                            st.session_state.completed_orders.append(order)
+                            # 전역 리스트에서 제거하여 동기화
+                            st.session_state.pharmacy_orders = [o for o in st.session_state.pharmacy_orders if o['order_id'] != order['order_id']]
+                            st.rerun()
+        with tab2:
+            my_done = [o for o in st.session_state.completed_orders if o['pharm_name'] == p_name]
+            if my_done:
+                st.table(pd.DataFrame(my_done)[['res_time', 'done_time', 'order_id']].rename(columns={'res_time':'예약','done_time':'완료','order_id':'ID'}))
+        
+        if st.button("⬅️ 메뉴로 돌아가기", use_container_width=True): st.session_state.admin_step = 2; st.rerun()
